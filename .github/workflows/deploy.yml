@@ -35,6 +35,8 @@ jobs:
         run: npm run build
         env:
           BASE_URL: /${{ github.event.repository.name }}/
+          VITE_WEBAPP_ID: ${{ secrets.VITE_WEBAPP_ID }}
+          VITE_API_KEY: ${{ secrets.VITE_API_KEY }}
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
