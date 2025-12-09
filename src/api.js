@@ -1,3 +1,19 @@
+// ⚠️ SECURITY WARNING ⚠️
+// This is a CLIENT-SIDE application. All VITE_ environment variables (including API keys)
+// are bundled into the JavaScript and are VISIBLE to anyone who:
+// - Views the page source
+// - Opens browser DevTools
+// - Inspects network requests
+//
+// IMPORTANT: API keys in client-side code are NEVER truly secret!
+// 
+// Best practices:
+// 1. Use API key restrictions (domain whitelist, rate limiting) if your API provider supports it
+// 2. Consider using a backend proxy to hide the API key (recommended for production)
+// 3. Never commit .env files with real API keys to version control
+// 4. Use different API keys for development and production
+// 5. Monitor API usage for unauthorized access
+//
 // Load API configuration from environment variables
 // Note: Vite requires VITE_ prefix for client-side environment variables
 export const API_CONFIG = {

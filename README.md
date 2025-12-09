@@ -62,7 +62,43 @@ ootd/
 
 ## API Configuration
 
-The API configuration is located in `src/App.jsx`. Update the `API_CONFIG` object if you need to change the API endpoint or credentials.
+The API configuration is located in `src/api.js`. Configure your API credentials using environment variables:
+
+Create a `.env` file in the root directory:
+```env
+VITE_API_KEY=your_api_key_here
+VITE_WEBAPP_ID=your_webapp_id_here
+VITE_API_URL=https://www.runninghub.ai/task/openapi/ai-app/run
+```
+
+### ⚠️ Security Warning
+
+**IMPORTANT**: This is a client-side application. All `VITE_` environment variables (including API keys) are bundled into the JavaScript and are **visible to anyone** who:
+- Views the page source
+- Opens browser DevTools
+- Inspects network requests
+
+**API keys in client-side code are NEVER truly secret!**
+
+#### Security Best Practices:
+
+1. **Use API key restrictions** (if your API provider supports it):
+   - Domain whitelist (only allow requests from your domain)
+   - Rate limiting
+   - IP restrictions
+
+2. **Use a backend proxy** (recommended for production):
+   - Create a server-side API that holds your API key
+   - Your frontend calls your backend, which then calls the external API
+   - This keeps your API key completely hidden from users
+
+3. **Never commit `.env` files** with real API keys to version control
+   - Add `.env` to `.gitignore`
+   - Use different API keys for development and production
+
+4. **Monitor API usage** for unauthorized access
+
+5. **Production builds** automatically remove `console.log` statements to prevent accidental exposure of sensitive data in logs
 
 ## Technologies Used
 

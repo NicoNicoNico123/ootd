@@ -3,8 +3,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Upload, Share2, Download, Image as ImageIcon, Loader2, RefreshCw, AlertCircle, Check, X, ArrowRight } from 'lucide-react';
 
 import { API_CONFIG, checkTaskStatus, getTaskOutputs, pollTaskStatus, pollTaskStatusHttp, uploadFile, getAccountStatus } from './api';
-
-
+import { safeLogPayload } from './utils';
 
 export default function App() {
   // Default clothing image - use base URL for GitHub Pages compatibility
@@ -322,7 +321,7 @@ export default function App() {
 
       };
 
-      console.log('Sending payload:', JSON.stringify(payload, null, 2));
+      safeLogPayload('Sending payload:', payload);
 
       // Add retry logic for network errors
       let response;
