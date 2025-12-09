@@ -71,6 +71,41 @@ The API configuration is located in `src/App.jsx`. Update the `API_CONFIG` objec
 - **Tailwind CSS** - Styling
 - **Lucide React** - Icons
 
+## Deployment to GitHub Pages
+
+This project is configured to automatically deploy to GitHub Pages using GitHub Actions.
+
+### Setup Instructions
+
+1. **Enable GitHub Pages in your repository:**
+   - Go to your repository on GitHub
+   - Navigate to **Settings** → **Pages**
+   - Under **Source**, select **GitHub Actions**
+
+2. **Push your code:**
+   - The workflow will automatically trigger on pushes to the `main` branch
+   - You can also manually trigger it from the **Actions** tab → **Deploy to GitHub Pages** → **Run workflow**
+
+3. **Access your deployed site:**
+   - After deployment, your site will be available at:
+     - `https://[username].github.io/[repository-name]/`
+   - The URL will be shown in the Actions workflow summary
+
+### Manual Deployment
+
+If you need to deploy manually:
+
+```bash
+# Build the project
+npm run build
+
+# The dist folder contains the built files ready for deployment
+```
+
+### Custom Domain
+
+If you're using a custom domain (e.g., `username.github.io`), you'll need to update the `BASE_URL` in the workflow file (`.github/workflows/deploy.yml`) to `/` instead of `/${{ github.event.repository.name }}/`.
+
 ## Notes
 
 - The current implementation uses the filename as a placeholder for the file hash. In production, you'll need to implement a proper file upload endpoint to get the actual file hash before calling the generation API.

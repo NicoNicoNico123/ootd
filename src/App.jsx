@@ -1,35 +1,20 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 
-import { Upload, Share2, Download, Image as ImageIcon, Loader2, RefreshCw, AlertCircle, Check } from 'lucide-react';
+import { Upload, Share2, Download, Image as ImageIcon, Loader2, RefreshCw, AlertCircle, Check, X, ArrowRight } from 'lucide-react';
 
-
-
-// Load API configuration from environment variables
-// Note: Vite requires VITE_ prefix for client-side environment variables
-const API_CONFIG = {
-  url: import.meta.env.VITE_API_URL || 'https://www.runninghub.ai/task/openapi/ai-app/run',
-  webappId: import.meta.env.VITE_WEBAPP_ID || '',
-  apiKey: import.meta.env.VITE_API_KEY || '',
-  host: import.meta.env.VITE_API_HOST || 'www.runninghub.ai',
-  // API endpoints
-  statusUrl: import.meta.env.VITE_STATUS_URL || 'https://www.runninghub.cn/task/openapi/status',
-  outputsUrl: import.meta.env.VITE_OUTPUTS_URL || 'https://www.runninghub.cn/task/openapi/outputs'
-};
-
-// Validate that required environment variables are set
-if (!API_CONFIG.apiKey || !API_CONFIG.webappId) {
-  console.error('Missing required environment variables: VITE_API_KEY and/or VITE_WEBAPP_ID');
-}
+import { API_CONFIG, checkTaskStatus, getTaskOutputs, pollTaskStatus, pollTaskStatusHttp, uploadFile, getAccountStatus } from './api';
 
 
 
 export default function App() {
+  // Default clothing image
+  const DEFAULT_CLOTHING_IMAGE = '/default/clothes.jpg';
 
   const [modelFile, setModelFile] = useState(null);
   const [modelPreview, setModelPreview] = useState(null);
   
   const [clothingFile, setClothingFile] = useState(null);
-  const [clothingPreview, setClothingPreview] = useState(null);
+  const [clothingPreview, setClothingPreview] = useState(DEFAULT_CLOTHING_IMAGE);
 
   const [generatedImage, setGeneratedImage] = useState(null);
 
@@ -47,7 +32,133 @@ export default function App() {
 
   const modelInputRef = useRef(null);
   const clothingInputRef = useRef(null);
-  const totalNodesRef = useRef(null); // Store total nodes to execute from promptTips
+  const taskStartTimeRef = useRef(null); // Store task start time for progress calculation
+  
+  // Tour/Onboarding state
+  const [showTour, setShowTour] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const modelUploadRef = useRef(null);
+  const clothingUploadRef = useRef(null);
+  const generateButtonRef = useRef(null);
+  
+  // Tour steps configuration
+  const tourSteps = [
+    {
+      title: 'Welcome to OOTD Gen! 👋',
+      description: 'Create AI-generated outfit try-ons in seconds. Let\'s get started!',
+      target: null,
+      position: 'center'
+    },
+    {
+      title: 'Step 1: Upload Your Photo',
+      description: 'Tap here to upload a photo of yourself or a model. This will be the base for your outfit try-on.',
+      target: modelUploadRef,
+      position: 'bottom'
+    },
+    {
+      title: 'Step 2: Upload Clothing (Optional)',
+      description: 'Upload a photo of the clothing item you want to try on. If you skip this, we\'ll use a default outfit.',
+      target: clothingUploadRef,
+      position: 'bottom'
+    },
+    {
+      title: 'Step 3: Generate Your Outfit',
+      description: 'Once you\'ve uploaded your photo, click here to generate your AI outfit try-on. It usually takes about 2-3 minutes.',
+      target: generateButtonRef,
+      position: 'top'
+    }
+  ];
+  
+  // Check if user has seen the tour before
+  useEffect(() => {
+    const hasSeenTour = localStorage.getItem('ootd-tour-completed');
+    if (!hasSeenTour) {
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        setShowTour(true);
+        // Scroll to first step if it has a target
+        if (tourSteps[0].target?.current) {
+          setTimeout(() => {
+            tourSteps[0].target.current.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center'
+            });
+          }, 300);
+        }
+      }, 500);
+    }
+  }, []);
+  
+  const handleTourNext = () => {
+    if (tourStep < tourSteps.length - 1) {
+      const nextStep = tourStep + 1;
+      setTourStep(nextStep);
+      
+      // Scroll to the target element if it exists
+      if (tourSteps[nextStep].target?.current) {
+        setTimeout(() => {
+          tourSteps[nextStep].target.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center'
+          });
+        }, 100);
+      }
+    } else {
+      handleTourComplete();
+    }
+  };
+  
+  const handleTourSkip = () => {
+    handleTourComplete();
+  };
+  
+  const handleTourComplete = () => {
+    setShowTour(false);
+    localStorage.setItem('ootd-tour-completed', 'true');
+  };
+  
+  // Function to reset and show tour (for testing)
+  const resetTour = useCallback(() => {
+    localStorage.removeItem('ootd-tour-completed');
+    setTourStep(0);
+    setShowTour(true);
+    // Scroll to first step if it has a target
+    setTimeout(() => {
+      if (tourSteps[0].target?.current) {
+        tourSteps[0].target.current.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    }, 300);
+  }, []);
+  
+  // Expose resetTour to window for console access
+  useEffect(() => {
+    window.resetOOTDTour = resetTour;
+    return () => {
+      delete window.resetOOTDTour;
+    };
+  }, [resetTour]);
+  
+  // Keyboard shortcut to reset tour (press 'T' key)
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      // Press 'T' key to reset tour (only when not typing in an input)
+      if (e.key === 't' || e.key === 'T') {
+        const target = e.target;
+        const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+        if (!isInput && !showTour) {
+          resetTour();
+        }
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyPress);
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [showTour, resetTour]);
 
 
 
@@ -99,516 +210,30 @@ export default function App() {
 
 
 
-  // Function to poll task status or use WebSocket
-  const pollTaskStatus = async (taskId, clientId, wsUrl, maxAttempts = 120, interval = 2000) => {
-    // Try WebSocket first if URL is provided
-    if (wsUrl) {
-      return new Promise((resolve, reject) => {
-        const ws = new WebSocket(wsUrl);
-        const timeout = setTimeout(() => {
-          ws.close();
-          // Fall back to polling
-          console.log('WebSocket timeout, falling back to polling...');
-          pollTaskStatusHttp(taskId, clientId, maxAttempts, interval).then(resolve).catch(reject);
-        }, 120000); // 2 minute timeout for WebSocket
-
-        ws.onopen = () => {
-          console.log('WebSocket connected, waiting for task completion...');
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log('WebSocket message:', JSON.stringify(message, null, 2));
-            
-            // Handle different message types
-            const messageType = message.type || message.event || message.status;
-            
-            // Handle progress messages
-            if (messageType === 'progress' && message.data) {
-              const progressValue = message.data.value ?? 0;
-              const progressMax = message.data.max ?? 100;
-              setProgress({ value: progressValue, max: progressMax });
-              console.log(`Progress: ${progressValue}/${progressMax} (${Math.round((progressValue / progressMax) * 100)}%)`);
-              return;
-            }
-            
-            // Task is still running
-            if (messageType === 'execution_cached' || messageType === 'executing' || 
-                messageType === 'status' && message.data?.taskStatus === 'RUNNING') {
-              console.log('Task still running...');
-              return;
-            }
-            
-            // Task completed - check various message formats
-            if (messageType === 'executed' || messageType === 'execution_complete' || 
-                messageType === 'completed' || messageType === 'success' ||
-                (messageType === 'status' && (message.data?.taskStatus === 'SUCCESS' || message.data?.taskStatus === 'COMPLETED'))) {
-              
-              console.log('Task completed, extracting result...');
-              setProgress({ value: 100, max: 100 }); // Set to 100% on completion
-              clearTimeout(timeout);
-              
-              // Try multiple ways to extract image URL
-              let imageUrl = null;
-              
-              // Method 1: Check data.output array
-              if (message.data?.output) {
-                const output = message.data.output;
-                if (Array.isArray(output) && output.length > 0) {
-                  for (const item of output) {
-                    if (item.filename || item.url || item.imageUrl) {
-                      imageUrl = item.filename || item.url || item.imageUrl;
-                      break;
-                    }
-                  }
-                } else if (typeof output === 'string') {
-                  imageUrl = output;
-                } else if (output.filename || output.url || output.imageUrl) {
-                  imageUrl = output.filename || output.url || output.imageUrl;
-                }
-              }
-              
-              // Method 2: Check data.result
-              if (!imageUrl && message.data?.result) {
-                if (typeof message.data.result === 'string') {
-                  imageUrl = message.data.result;
-                } else if (message.data.result.filename || message.data.result.url || message.data.result.imageUrl) {
-                  imageUrl = message.data.result.filename || message.data.result.url || message.data.result.imageUrl;
-                }
-              }
-              
-              // Method 3: Check data.resultUrl or data.url
-              if (!imageUrl) {
-                imageUrl = message.data?.resultUrl || message.data?.url || message.data?.imageUrl;
-              }
-              
-              // Method 4: Check top-level properties
-              if (!imageUrl) {
-                imageUrl = message.resultUrl || message.url || message.imageUrl || message.filename;
-              }
-              
-              // Method 5: Check if message has images array
-              if (!imageUrl && message.images && Array.isArray(message.images) && message.images.length > 0) {
-                imageUrl = message.images[0].filename || message.images[0].url || message.images[0];
-              }
-              
-              if (imageUrl) {
-                // Construct full URL if it's a relative path
-                if (imageUrl.startsWith('http')) {
-                  ws.close();
-                  resolve(imageUrl);
-                  return;
-                } else {
-                  // Try both domains
-                  const fullUrl = imageUrl.startsWith('/') 
-                    ? `https://www.runninghub.ai${imageUrl}`
-                    : `https://www.runninghub.ai/${imageUrl}`;
-                  ws.close();
-                  resolve(fullUrl);
-                  return;
-                }
-              }
-              
-              // If we can't extract URL from WebSocket, wait a bit then fall back to polling
-              console.log('WebSocket completed but no URL found in message, waiting 2s then polling...');
-              ws.close();
-              setTimeout(() => {
-                pollTaskStatusHttp(taskId, clientId, maxAttempts, interval).then(resolve).catch(reject);
-              }, 2000);
-              return;
-            }
-            
-            // Check if message contains task status update
-            if (message.data?.taskStatus === 'SUCCESS' || message.data?.taskStatus === 'COMPLETED') {
-              console.log('Task status updated to SUCCESS, polling for result...');
-              ws.close();
-              pollTaskStatusHttp(taskId, clientId, maxAttempts, interval).then(resolve).catch(reject);
-              return;
-            }
-            
-            if (message.data?.taskStatus === 'FAILED') {
-              ws.close();
-              reject(new Error(message.data.error || message.msg || 'Task failed'));
-              return;
-            }
-            
-          } catch (e) {
-            console.error('Error parsing WebSocket message:', e, 'Raw message:', event.data);
-          }
-        };
-
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          clearTimeout(timeout);
-          ws.close();
-          // Fall back to polling
-          console.log('WebSocket error, falling back to HTTP polling...');
-          pollTaskStatusHttp(taskId, clientId, maxAttempts, interval).then(resolve).catch(reject);
-        };
-        
-        ws.onclose = (event) => {
-          console.log('WebSocket closed:', event.code, event.reason);
-          clearTimeout(timeout);
-          // If closed unexpectedly and we haven't resolved, try polling
-          if (!event.wasClean) {
-            console.log('WebSocket closed unexpectedly, falling back to polling...');
-            pollTaskStatusHttp(taskId, clientId, maxAttempts, interval).then(resolve).catch(reject);
-          }
-        };
-      });
-    } else {
-      // No WebSocket URL, use HTTP polling
-      return pollTaskStatusHttp(taskId, clientId, maxAttempts, interval);
-    }
-  };
-
-  // Function to check task status using the status endpoint
-  const checkTaskStatus = async (taskId) => {
-    const statusEndpoint = API_CONFIG.statusUrl;
-    
-    try {
-      const response = await fetch(statusEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          apiKey: API_CONFIG.apiKey,
-          taskId: taskId,
-        }),
-      });
-
-      const data = await response.json();
-      
-      // Log the full response to debug progress information
-      console.log('Status API response:', JSON.stringify(data, null, 2));
-      
-      if (data.code !== 0) {
-        // Handle special status codes
-        if (data.code === 804) {
-          // APIKEY_TASK_IS_RUNNING
-          return { status: 'RUNNING', progress: null };
-        } else if (data.code === 813) {
-          // APIKEY_TASK_IS_QUEUED
-          return { status: 'QUEUED', progress: null };
-        } else if (data.code === 805) {
-          // APIKEY_TASK_STATUS_ERROR - task failed
-          return { status: 'FAILED', progress: null };
-        }
-        throw new Error(data.msg || 'Failed to check task status');
-      }
-
-      // Extract status - could be a string or in an object
-      let status = 'UNKNOWN';
-      if (typeof data.data === 'string') {
-        status = data.data;
-      } else if (data.data && typeof data.data === 'object') {
-        status = data.data.taskStatus || data.data.status || data.data.state || 'UNKNOWN';
-      }
-      
-      // Extract progress information from various possible locations
-      let progress = null;
-      if (data.data && typeof data.data === 'object') {
-        // Check for progress in data.data
-        if (data.data.progress !== undefined) {
-          const prog = data.data.progress;
-          if (typeof prog === 'number') {
-            progress = { value: prog, max: 100 };
-          } else if (typeof prog === 'object' && (prog.value !== undefined || prog.current !== undefined)) {
-            progress = {
-              value: prog.value ?? prog.current ?? 0,
-              max: prog.max ?? prog.total ?? 100
-            };
-          }
-        }
-        // Check for progress in other common fields
-        if (!progress && data.data.currentStep !== undefined && data.data.totalSteps !== undefined) {
-          progress = { value: data.data.currentStep, max: data.data.totalSteps };
-        }
-        if (!progress && data.data.step !== undefined && data.data.steps !== undefined) {
-          progress = { value: data.data.step, max: data.data.steps };
-        }
-        // Check for percentage
-        if (!progress && data.data.percentage !== undefined) {
-          progress = { value: data.data.percentage, max: 100 };
-        }
-        
-        // Extract progress from promptTips if available
-        // promptTips contains JSON with outputs_to_execute array
-        if (!progress && data.data.promptTips) {
-          try {
-            const promptTips = typeof data.data.promptTips === 'string' 
-              ? JSON.parse(data.data.promptTips) 
-              : data.data.promptTips;
-            
-            if (promptTips.outputs_to_execute && Array.isArray(promptTips.outputs_to_execute)) {
-              const totalNodes = totalNodesRef.current || promptTips.outputs_to_execute.length;
-              // If we have totalNodes stored, we can calculate progress
-              // For now, we'll use a simple heuristic: if status is RUNNING, estimate based on time
-              // Or we could track executed nodes if the API provides that info
-              if (totalNodesRef.current) {
-                // Estimate progress: if RUNNING, assume some progress has been made
-                // This is a rough estimate - ideally the API would tell us which nodes completed
-                if (status === 'RUNNING') {
-                  // Estimate 30-70% progress when running (rough estimate)
-                  // Without knowing which nodes completed, we can't be precise
-                  progress = { value: Math.max(1, Math.floor(totalNodes * 0.5)), max: totalNodes };
-                } else if (status === 'QUEUED') {
-                  progress = { value: 0, max: totalNodes };
-                }
-              } else {
-                // Store total nodes for future reference
-                totalNodesRef.current = promptTips.outputs_to_execute.length;
-                if (status === 'QUEUED') {
-                  progress = { value: 0, max: totalNodesRef.current };
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('Failed to parse promptTips:', e);
-          }
-        }
-      }
-      
-      // Check top-level progress fields
-      if (!progress && data.progress !== undefined) {
-        const prog = data.progress;
-        if (typeof prog === 'number') {
-          progress = { value: prog, max: 100 };
-        } else if (typeof prog === 'object' && (prog.value !== undefined || prog.current !== undefined)) {
-          progress = {
-            value: prog.value ?? prog.current ?? 0,
-            max: prog.max ?? prog.total ?? 100
-          };
-        }
-      }
-      
-      // If still no progress but we have totalNodes, provide a basic progress indicator
-      if (!progress && totalNodesRef.current) {
-        if (status === 'QUEUED') {
-          progress = { value: 0, max: totalNodesRef.current };
-        } else if (status === 'RUNNING') {
-          // Estimate 50% when running (we don't know exact progress)
-          progress = { value: Math.floor(totalNodesRef.current * 0.5), max: totalNodesRef.current };
-        }
-      }
-      
-      return { status, progress };
-    } catch (error) {
-      console.error('Error checking task status:', error);
-      throw error;
-    }
-  };
-
-  // Function to get task outputs (results) using the outputs endpoint
-  const getTaskOutputs = async (taskId) => {
-    const outputsEndpoint = API_CONFIG.outputsUrl;
-    
-    try {
-      const response = await fetch(outputsEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          apiKey: API_CONFIG.apiKey,
-          taskId: taskId,
-        }),
-      });
-
-      const data = await response.json();
-      console.log('Task outputs response:', JSON.stringify(data, null, 2));
-      
-      if (data.code !== 0) {
-        // Handle special status codes
-        if (data.code === 804) {
-          // APIKEY_TASK_IS_RUNNING
-          throw new Error('Task is still running');
-        } else if (data.code === 813) {
-          // APIKEY_TASK_IS_QUEUED
-          throw new Error('Task is still queued');
-        } else if (data.code === 805) {
-          // APIKEY_TASK_STATUS_ERROR - task failed
-          const failedReason = data.data?.failedReason;
-          const errorMsg = failedReason?.exception_message || failedReason?.node_name || data.msg || 'Task failed';
-          throw new Error(errorMsg);
-        }
-        throw new Error(data.msg || 'Failed to get task outputs');
-      }
-
-      // Outputs endpoint returns an array of file objects
-      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
-        // Find the first file with a fileUrl (usually the generated image)
-        for (const file of data.data) {
-          if (file.fileUrl) {
-            return file.fileUrl;
-          }
-        }
-        // If no fileUrl found, return the first item for further processing
-        return data.data[0];
-      }
-      
-      throw new Error('No outputs found in response');
-    } catch (error) {
-      console.error('Error getting task outputs:', error);
-      throw error;
-    }
-  };
-
-  // HTTP polling function - updated to use correct endpoints
-  const pollTaskStatusHttp = async (taskId, clientId, maxAttempts = 120, interval = 2000) => {
-    
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        await new Promise(resolve => setTimeout(resolve, interval));
-        
-        // Check task status using the status endpoint
-        const { status, progress } = await checkTaskStatus(taskId);
-        
-        // Update progress if available
-        if (progress) {
-          setProgress(progress);
-          console.log(`Progress: ${progress.value}/${progress.max} (${Math.round((progress.value / progress.max) * 100)}%)`);
-        }
-        
-        // Log every 10th attempt or when status changes
-        if (attempt % 10 === 0 || status === 'SUCCESS' || status === 'FAILED') {
-          console.log(`Polling attempt ${attempt + 1}: Task status = ${status}`, progress ? `Progress: ${progress.value}/${progress.max}` : '');
-        }
-
-        if (status === 'SUCCESS') {
-          // Task completed, get the outputs
-          console.log('Task completed! Fetching outputs...');
-          setProgress({ value: 100, max: 100 }); // Set to 100% on completion
-          const fileUrl = await getTaskOutputs(taskId);
-          return fileUrl;
-        } else if (status === 'FAILED') {
-          // Task failed, try to get error details from outputs endpoint
-          try {
-            await getTaskOutputs(taskId);
-          } catch (outputError) {
-            throw new Error(outputError.message || 'Task failed');
-          }
-          throw new Error('Task failed');
-        } else if (status === 'RUNNING' || status === 'QUEUED') {
-          // Continue polling - task is still processing
-          continue;
-        } else {
-          // Unknown status, continue polling
-          console.warn(`Unknown status: ${status}, continuing to poll...`);
-          continue;
-        }
-      } catch (err) {
-        // If it's a "still running" or "still queued" error, continue polling
-        if (err.message.includes('still running') || err.message.includes('still queued')) {
-          continue;
-        }
-        
-        if (attempt === maxAttempts - 1) {
-          throw err;
-        }
-        console.warn(`Polling error (attempt ${attempt + 1}):`, err);
-      }
-    }
-
-    throw new Error('Task polling timeout - task did not complete in time');
-  };
-
-  // Function to upload file and get hash
-  const uploadFile = async (file) => {
-
-    // Try the official upload endpoint (try .ai first to match working curl)
-    const uploadEndpoints = [
-      'https://www.runninghub.ai/task/openapi/upload',
-      'https://www.runninghub.cn/task/openapi/upload', // Fallback to .cn
-    ];
-
-    for (const endpoint of uploadEndpoints) {
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('fileType', 'image');
-        formData.append('apiKey', API_CONFIG.apiKey);
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          // Don't set Content-Type header - browser will set it automatically with boundary for FormData
-          body: formData,
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log('Upload response:', data);
-          
-          if (data.code === 0 && data.data) {
-            // Official format: data.data.fileName
-            if (data.data.fileName) {
-              return data.data.fileName;
-            }
-          }
-          
-          // Try different possible response formats
-          if (data.fileHash || data.hash || data.file_id || data.id || data.fileName) {
-            return data.fileHash || data.hash || data.file_id || data.id || data.fileName;
-          }
-          if (data.data && (data.data.fileHash || data.data.hash || data.data.file_id || data.data.fileName)) {
-            return data.data.fileHash || data.data.hash || data.data.file_id || data.data.fileName;
-          }
-          if (typeof data === 'string') {
-            return data;
-          }
-        } else {
-          // Log the error response for debugging
-          const errorData = await response.json().catch(() => ({}));
-          console.log(`Upload endpoint ${endpoint} returned ${response.status}:`, errorData);
-        }
-      } catch (e) {
-        // Silently continue to next endpoint or fallback
-        console.log(`Upload endpoint ${endpoint} failed:`, e.message);
-        continue;
-      }
-    }
-
-    // If no upload endpoint works, generate a hash from file content
-    // This is a fallback - using file hash as identifier
-    console.log('Upload endpoints unavailable, generating hash from file content (this may work if API accepts file hashes)...');
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const arrayBuffer = e.target.result;
-          const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-          const hashArray = Array.from(new Uint8Array(hashBuffer));
-          const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-          // Append original extension
-          const extension = file.name.split('.').pop();
-          resolve(`${hashHex}.${extension}`);
-        } catch (hashError) {
-          console.error('Error generating hash:', hashError);
-          // Fallback to filename if hash generation fails
-          resolve(file.name);
-        }
-      };
-      reader.onerror = () => {
-        console.error('FileReader error, using filename as fallback');
-        resolve(file.name);
-      };
-      reader.readAsArrayBuffer(file);
-    });
-  };
 
 
 
   const handleGenerate = async () => {
-
-    if (!modelFile || !clothingFile) {
-
-      setError('Please upload both model and clothing images.');
-
+    // Require model image to be uploaded
+    if (!modelFile) {
+      setError('Please upload a model image.');
       return;
-
     }
+
+    // Use default clothing image if no file is selected
+    let clothingImageToUse = clothingFile;
+    if (!clothingFile) {
+      try {
+        const response = await fetch(DEFAULT_CLOTHING_IMAGE);
+        const blob = await response.blob();
+        clothingImageToUse = new File([blob], 'clothes.jpg', { type: 'image/jpeg' });
+      } catch (err) {
+        setError('Failed to load default clothing image.');
+        return;
+      }
+    }
+
+    const modelImageToUse = modelFile;
 
 
 
@@ -617,19 +242,32 @@ export default function App() {
     setError('');
 
     setProgress({ value: 0, max: 100 });
-    totalNodesRef.current = null; // Reset total nodes for new generation
+    taskStartTimeRef.current = Date.now(); // Record start time for progress calculation
 
 
 
     try {
+      // Check account status to see if we can start a new task
+      console.log('Checking account status...');
+      const accountStatus = await getAccountStatus();
+      const currentTaskCounts = accountStatus.currentTaskCounts;
+      
+      console.log(`Current task counts: ${currentTaskCounts}`);
+      
+      // If currentTaskCounts is 3 or more, forbid generating new request
+      if (currentTaskCounts >= 3) {
+        setLoading(false);
+        setError(`Cannot generate new request. You have ${currentTaskCounts} tasks currently running. Please wait until some tasks complete (maximum 3 concurrent tasks allowed).`);
+        return;
+      }
 
       // Upload both files to get their hashes
       console.log('Uploading model image...');
-      const modelHash = await uploadFile(modelFile);
+      const modelHash = await uploadFile(modelImageToUse);
       console.log('Model hash obtained:', modelHash);
       
       console.log('Uploading clothing image...');
-      const clothingHash = await uploadFile(clothingFile);
+      const clothingHash = await uploadFile(clothingImageToUse);
       console.log('Clothing hash obtained:', clothingHash);
       
       // Clear any previous errors
@@ -821,24 +459,6 @@ export default function App() {
           const clientId = data.data.clientId;
           const taskStatus = data.data.taskStatus;
           
-          // Extract and store total nodes from promptTips for progress tracking
-          if (data.data.promptTips) {
-            try {
-              const promptTips = typeof data.data.promptTips === 'string' 
-                ? JSON.parse(data.data.promptTips) 
-                : data.data.promptTips;
-              
-              if (promptTips.outputs_to_execute && Array.isArray(promptTips.outputs_to_execute)) {
-                totalNodesRef.current = promptTips.outputs_to_execute.length;
-                console.log(`Total nodes to execute: ${totalNodesRef.current}`, promptTips.outputs_to_execute);
-                // Set initial progress
-                setProgress({ value: 0, max: totalNodesRef.current });
-              }
-            } catch (e) {
-              console.warn('Failed to parse promptTips for node count:', e);
-            }
-          }
-          
           if (taskStatus === 'SUCCESS' || taskStatus === 'COMPLETED') {
             // Already completed, try to extract result
             if (data.data.resultUrl) {
@@ -849,11 +469,11 @@ export default function App() {
               imageUrl = data.data.url;
             }
           } else if (taskStatus === 'RUNNING' || taskStatus === 'QUEUED' || taskStatus === 'CREATE') {
-            // Task is running/queued, poll for status (try WebSocket first, then HTTP polling)
+            // Task is running/queued, poll for status using HTTP polling
             console.log(`Task status: ${taskStatus}, starting to poll for results...`);
             try {
-              const wsUrl = data.data.netWssUrl;
-              const result = await pollTaskStatus(taskId, clientId, wsUrl);
+              const wsUrl = data.data.netWssUrl; // Not used anymore, but kept for compatibility
+              const result = await pollTaskStatus(taskId, clientId, wsUrl, 120, 2000, setProgress, taskStartTimeRef);
               if (typeof result === 'string' && result.startsWith('http')) {
                 imageUrl = result;
               } else if (result && typeof result === 'object') {
@@ -1004,11 +624,11 @@ export default function App() {
 
             <div className="w-8 h-8 bg-purple-600 rounded-lg flex items-center justify-center text-white font-bold">
 
-              Ai
+              OOTD
 
             </div>
 
-            <h1 className="text-xl font-bold tracking-tight text-neutral-900">OOTD Gen</h1>
+            <h1 className="text-xl font-bold tracking-tight text-neutral-900">OOTD(Beta)</h1>
 
           </div>
 
@@ -1126,7 +746,7 @@ export default function App() {
 
                 setModelPreview(null);
                 setModelFile(null);
-                setClothingPreview(null);
+                setClothingPreview(DEFAULT_CLOTHING_IMAGE);
                 setClothingFile(null);
 
               }}
@@ -1155,13 +775,14 @@ export default function App() {
             <div className="space-y-6">
 
               {/* Model Upload */}
-              <div className="space-y-2">
+              <div className="space-y-2" ref={modelUploadRef}>
                 <h3 className="text-sm font-medium text-neutral-700">Upload Model</h3>
                 <div 
                   onClick={() => triggerFileSelect('model')}
                   className={`
-                    relative aspect-[3/4] w-full rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer overflow-hidden
-                    ${modelPreview ? 'border-purple-500 bg-purple-50' : 'border-neutral-300 hover:border-purple-400 hover:bg-neutral-50'}
+                    relative aspect-[3/4] w-full rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer overflow-hidden flex items-center justify-center
+                    ${modelFile ? 'border-purple-500 bg-purple-50' : 'border-neutral-300 hover:border-purple-400 hover:bg-neutral-50'}
+                    ${showTour && tourStep === 1 ? 'ring-4 ring-purple-500 ring-offset-2' : ''}
                   `}
                 >
                   <input 
@@ -1186,24 +807,26 @@ export default function App() {
                       </div>
                     </>
                   ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 gap-3">
-                      <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center">
-                        <Upload className="w-6 h-6 text-purple-600" />
+                    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                      <ImageIcon className="w-12 h-12 text-neutral-400" />
+                      <div>
+                        <p className="text-sm font-medium text-neutral-700">Upload your image</p>
+                        <p className="text-xs text-neutral-500 mt-1">Tap to select a photo</p>
                       </div>
-                      <p className="text-sm font-medium text-neutral-900">Tap to upload</p>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Clothing Upload */}
-              <div className="space-y-2">
+              <div className="space-y-2" ref={clothingUploadRef}>
                 <h3 className="text-sm font-medium text-neutral-700">Upload Clothing</h3>
                 <div 
                   onClick={() => triggerFileSelect('clothing')}
                   className={`
                     relative aspect-[3/4] w-full rounded-2xl border-2 border-dashed transition-all duration-200 cursor-pointer overflow-hidden
-                    ${clothingPreview ? 'border-purple-500 bg-purple-50' : 'border-neutral-300 hover:border-purple-400 hover:bg-neutral-50'}
+                    ${clothingFile ? 'border-purple-500 bg-purple-50' : 'border-neutral-300 hover:border-purple-400 hover:bg-neutral-50'}
+                    ${showTour && tourStep === 2 ? 'ring-4 ring-purple-500 ring-offset-2' : ''}
                   `}
                 >
                   <input 
@@ -1214,27 +837,16 @@ export default function App() {
                     className="hidden"
                   />
                   
-                  {clothingPreview ? (
-                    <>
-                      <img 
-                        src={clothingPreview} 
-                        alt="Clothing preview" 
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                        <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-full text-sm font-medium shadow-sm">
-                          Change Photo
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-400 gap-3">
-                      <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center">
-                        <Upload className="w-6 h-6 text-purple-600" />
-                      </div>
-                      <p className="text-sm font-medium text-neutral-900">Tap to upload</p>
+                  <img 
+                    src={clothingPreview} 
+                    alt="Clothing preview" 
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
+                    <div className="bg-white/90 backdrop-blur px-4 py-2 rounded-full text-sm font-medium shadow-sm">
+                      {clothingFile ? 'Change Photo' : 'Tap to upload'}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
 
@@ -1246,19 +858,23 @@ export default function App() {
 
             <button
 
+              ref={generateButtonRef}
+
               onClick={handleGenerate}
 
-              disabled={loading || !modelFile || !clothingFile}
+              disabled={loading || !modelFile}
 
               className={`
 
                 w-full ${loading ? 'min-h-14 py-4' : 'h-14'} rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.98] duration-200
 
-                ${loading || !modelFile || !clothingFile 
+                ${loading || !modelFile
 
                   ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed' 
 
                   : 'bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-600/25'}
+
+                ${showTour && tourStep === 3 ? 'ring-4 ring-purple-500 ring-offset-2' : ''}
 
               `}
 
@@ -1326,7 +942,7 @@ export default function App() {
                 
                 {progress.value < progress.max && (
                   <p className="text-xs text-center text-neutral-500">
-                    {progress.value} of {progress.max} steps completed
+                    {progress.value}% complete • Estimated time: {Math.max(0, Math.ceil(180 - (progress.value / 100 * 180)))}s remaining
                   </p>
                 )}
               </div>
@@ -1349,6 +965,209 @@ export default function App() {
         )}
 
       </main>
+
+      {/* Tour Overlay */}
+      {showTour && (() => {
+        // Calculate position and determine actual placement
+        const getCalloutPosition = () => {
+          if (!tourSteps[tourStep].target?.current) {
+            return {
+              style: {
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '90%',
+                maxWidth: '400px'
+              },
+              arrowDirection: null
+            };
+          }
+          
+          const rect = tourSteps[tourStep].target.current.getBoundingClientRect();
+          const position = tourSteps[tourStep].position;
+          const calloutHeight = 220; // Estimated height of callout
+          const padding = 16;
+          const viewportHeight = window.innerHeight;
+          const viewportWidth = window.innerWidth;
+          
+          if (position === 'center') {
+            return {
+              style: {
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '90%',
+                maxWidth: '400px'
+              },
+              arrowDirection: null
+            };
+          } else if (position === 'bottom') {
+            // Check if there's enough space below
+            const spaceBelow = viewportHeight - rect.bottom;
+            const spaceAbove = rect.top;
+            const useTop = spaceBelow < calloutHeight + padding && spaceAbove > spaceBelow;
+            
+            const left = Math.max(padding, Math.min(rect.left + (rect.width / 2), viewportWidth - padding));
+            const maxWidth = Math.min(320, viewportWidth - (padding * 2));
+            
+            if (useTop) {
+              // Position above if not enough space below
+              return {
+                style: {
+                  bottom: `${viewportHeight - rect.top + padding}px`,
+                  left: `${left}px`,
+                  transform: 'translateX(-50%)',
+                  width: '90%',
+                  maxWidth: `${maxWidth}px`
+                },
+                arrowDirection: 'down' // Arrow points down to element
+              };
+            } else {
+              // Position below
+              const top = Math.min(rect.bottom + padding, viewportHeight - calloutHeight - padding);
+              return {
+                style: {
+                  top: `${top}px`,
+                  left: `${left}px`,
+                  transform: 'translateX(-50%)',
+                  width: '90%',
+                  maxWidth: `${maxWidth}px`
+                },
+                arrowDirection: 'up' // Arrow points up to element
+              };
+            }
+          } else if (position === 'top') {
+            // Check if there's enough space above
+            const spaceAbove = rect.top;
+            const spaceBelow = viewportHeight - rect.bottom;
+            const useBottom = spaceAbove < calloutHeight + padding && spaceBelow > spaceAbove;
+            
+            const left = Math.max(padding, Math.min(rect.left + (rect.width / 2), viewportWidth - padding));
+            const maxWidth = Math.min(320, viewportWidth - (padding * 2));
+            
+            if (useBottom) {
+              // Position below if not enough space above
+              const top = Math.min(rect.bottom + padding, viewportHeight - calloutHeight - padding);
+              return {
+                style: {
+                  top: `${top}px`,
+                  left: `${left}px`,
+                  transform: 'translateX(-50%)',
+                  width: '90%',
+                  maxWidth: `${maxWidth}px`
+                },
+                arrowDirection: 'up' // Arrow points up to element
+              };
+            } else {
+              // Position above
+              const bottom = Math.min(window.innerHeight - rect.top + padding, viewportHeight - padding);
+              return {
+                style: {
+                  bottom: `${bottom}px`,
+                  left: `${left}px`,
+                  transform: 'translateX(-50%)',
+                  width: '90%',
+                  maxWidth: `${maxWidth}px`
+                },
+                arrowDirection: 'down' // Arrow points down to element
+              };
+            }
+          }
+          return { style: {}, arrowDirection: null };
+        };
+        
+        const { style: calloutStyle, arrowDirection } = getCalloutPosition();
+        
+        return (
+          <>
+            {/* Backdrop */}
+            <div 
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 transition-opacity duration-300"
+              onClick={handleTourSkip}
+            />
+            
+            {/* Tour Callout */}
+            <div 
+              className="fixed z-50 transition-all duration-300"
+              style={calloutStyle}
+            >
+            <div className="bg-white rounded-2xl shadow-2xl p-6 relative animate-in fade-in slide-in-from-bottom-4">
+              {/* Close button */}
+              <button
+                onClick={handleTourSkip}
+                className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors"
+                aria-label="Skip tour"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              
+              {/* Content */}
+              <div className="pr-8">
+                <h3 className="text-xl font-bold text-neutral-900 mb-2">
+                  {tourSteps[tourStep].title}
+                </h3>
+                <p className="text-sm text-neutral-600 leading-relaxed mb-6">
+                  {tourSteps[tourStep].description}
+                </p>
+                
+                {/* Progress indicator */}
+                <div className="flex items-center gap-2 mb-4">
+                  {tourSteps.map((_, index) => (
+                    <div
+                      key={index}
+                      className={`h-1.5 flex-1 rounded-full transition-all ${
+                        index <= tourStep ? 'bg-purple-600' : 'bg-neutral-200'
+                      }`}
+                    />
+                  ))}
+                </div>
+                
+                {/* Actions */}
+                <div className="flex items-center justify-between gap-3">
+                  <button
+                    onClick={handleTourSkip}
+                    className="px-4 py-2 text-sm font-medium text-neutral-600 hover:text-neutral-900 transition-colors"
+                  >
+                    Skip Tour
+                  </button>
+                  <button
+                    onClick={handleTourNext}
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium flex items-center gap-2 transition-colors active:scale-95 transform duration-100"
+                  >
+                    {tourStep === tourSteps.length - 1 ? 'Get Started' : 'Next'}
+                    {tourStep < tourSteps.length - 1 && <ArrowRight className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+              
+              {/* Arrow pointer for non-center positions */}
+              {arrowDirection && (
+                <div 
+                  className="absolute w-0 h-0"
+                  style={{
+                    ...(arrowDirection === 'down' ? {
+                      bottom: '100%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      borderLeft: '12px solid transparent',
+                      borderRight: '12px solid transparent',
+                      borderBottom: '12px solid white'
+                    } : {
+                      top: '100%',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      borderLeft: '12px solid transparent',
+                      borderRight: '12px solid transparent',
+                      borderTop: '12px solid white'
+                    })
+                  }}
+                />
+              )}
+            </div>
+          </div>
+        </>
+      );
+      })()}
 
     </div>
 
