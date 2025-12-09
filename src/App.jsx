@@ -7,8 +7,9 @@ import { API_CONFIG, checkTaskStatus, getTaskOutputs, pollTaskStatus, pollTaskSt
 
 
 export default function App() {
-  // Default clothing image
-  const DEFAULT_CLOTHING_IMAGE = '/default/clothes.jpg';
+  // Default clothing image - use base URL for GitHub Pages compatibility
+  const BASE_URL = import.meta.env.BASE_URL;
+  const DEFAULT_CLOTHING_IMAGE = `${BASE_URL}default/clothes.jpg`;
 
   const [modelFile, setModelFile] = useState(null);
   const [modelPreview, setModelPreview] = useState(null);
@@ -632,12 +633,6 @@ export default function App() {
 
           </div>
 
-          <a href="#" className="text-sm font-medium text-purple-600 hover:text-purple-700">
-
-            History
-
-          </a>
-
         </div>
 
       </header>
@@ -648,7 +643,7 @@ export default function App() {
           <h2 className="text-sm font-semibold text-neutral-700 mb-3 text-center">How it works</h2>
           <div className="w-full rounded-xl overflow-hidden shadow-sm border border-neutral-200">
             <img 
-              src="/preview.jpg" 
+              src={`${BASE_URL}preview.jpg`}
               alt="OOTD Generator Preview - Character, Clothes, and Try-on" 
               className="w-full h-auto object-cover"
             />
